@@ -164,8 +164,7 @@ def check_zea_range(f, n_gates_av=NEAR_FIELD_AV, n_gates_ap=NEAR_FIELD_AP, date=
     
     return pd.Series({
         'file': f.name,
-        'n_aberrant_val': n_detected,
-        'n_aberrant_range': n_aberrant,
+        'n_aberrant_val': n_aberrant,
         'pct_aberrant_range': (n_aberrant / n_detected * 100) if n_detected > 0 else 0
     })
 

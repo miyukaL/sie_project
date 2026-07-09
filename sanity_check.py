@@ -47,7 +47,7 @@ CSV_PATH = os.path.join(OUTPUT_DIR, "sanity_check.csv")
 # - check_single_timestamp_anf : ['n_timestamps_anfa', 'is_single_timestamp_anfa']
 # - check_all_nan : ['all_nan']
 # - weird_timestamps : ['n_weird_timesteps', 'pct_weird_timesteps', 'values_weird_timesteps']
-# - check_zea_range : ['n_aberrant_val', 'n_aberrant_range', 'pct_aberrant_range']
+# - check_zea_range : ['n_aberrant_val', 'pct_aberrant_range']
 # - check_nearfield_artefact : ['frac_contaminated_nfa', 'is_contaminated_nfa']
 # - check_truncated : ['n_timesteps', 'expected', 'is_truncated']
 # - check_separated_hours : ['is_separated_hour']
@@ -107,7 +107,7 @@ def run_all_checks(files, csv_path: str) -> None:
     # ABERRANT ZEA VALUES
     run_check_if_needed(
         check_zea_range, files,
-        ['n_aberrant_val', 'n_aberrant_range', 'pct_aberrant_range'],
+        ['n_aberrant_val', 'pct_aberrant_range'],
         csv_path=csv_path,
     )
  

@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import xarray as xr
-import calendar
+from datetime import datetime
 from scipy.ndimage import uniform_filter
 from tqdm import tqdm
 from joblib import Parallel, delayed
@@ -17,27 +17,22 @@ NEAR_FIELD_AP = 6
 CSV_PATH = "sanity_check_output/sanity_check.csv"
 
 
-def file_exist_csv(folder, year=2025):
-
-    "Check if files exist for all expected hours and save results to CSV"
-    "folder: base folder containing the subfolders"
-    "year : year for which is conducted the sanity check"
+def file_exist_csv(folder, start_date, end_date):
+    """Check if files exist for all expected hours between start_date and end_date."""
+    dates = pd.date_range(start=start_date, end=end_date, freq="h")
 
     ds = []
-
-    for month in range(1, 13):
-        _, n_days = calendar.monthrange(year, month)  # automaticly deal with bisextiles
-        for day in range(1, n_days + 1):
-            for hour in range(24):
-                date = f"{year}/{month:02d}/{day:02d}"
-                filename = f"{year}{month:02d}{day:02d}_{hour:02d}0000.nc"
-                path = folder + date +"/"+ filename
-                ds.append({
-                    "date": f"{date}_{hour:02d}:00",
-                    "file_path": str(path) if os.path.isfile(path) else np.nan,
-                    "file_name": filename if os.path.isfile(path) else np.nan, 
-                    "is_file_available": os.path.isfile(path)
-                })
+    for dt in dates:
+        date_str = f"{dt.year}/{dt.month:02d}/{dt.day:02d}"
+        filename = f"{dt.year}{dt.month:02d}{dt.day:02d}_{dt.hour:02d}0000.nc"
+        path = os.path.join(folder, date_str, filename)
+        exists = os.path.isfile(path)
+        ds.append({
+            "date": f"{date_str}_{dt.hour:02d}:00",
+            "file_path": path if exists else np.nan,
+            "file_name": filename if exists else np.nan,
+            "is_file_available": exists
+        })
 
     df = pd.DataFrame(ds)
     return df

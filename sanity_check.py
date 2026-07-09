@@ -10,7 +10,8 @@ Usage:
 """
 
 import os
-from pathlib import Path    
+from pathlib import Path   
+from datetime import datetime 
 from sanity_check_operations import (
     file_exist_csv,
     find_zea_above_echotop,
@@ -61,7 +62,7 @@ def ensure_base_csv(folder: str, year: int, csv_path: str) -> None:
     os.makedirs(os.path.dirname(csv_path), exist_ok=True) 
  
     if not os.path.exists(csv_path):
-        df = file_exist_csv(folder, year=year)
+        df = file_exist_csv(folder, start_date=datetime(2025, 1, 1, 0), end_date=datetime(2025, 12, 31, 23))
         df.to_csv(csv_path, index=False)
  
  

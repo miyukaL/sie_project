@@ -18,19 +18,14 @@ from sanity_check_operations import (
     check_single_timestamp,
     check_single_timestamp_anf,
     check_all_nan,
-    weird_timestamps,
     check_zea_range,
     check_nearfield_artefact,
     check_truncated,
     check_separated_hours,
     find_separated_hours,
-    check_var_coherence,
-    check_laplacian,
-    check_isolated_detections,
-    check_isolated_detections_noise,
+    check_regularized_all,
     run_check_if_needed,
 )
-
 # --------------------------------------------------------------------------------------------------
 # CONFIGURATION 
 # --------------------------------------------------------------------------------------------------
@@ -41,20 +36,20 @@ OUTPUT_DIR = "sanity_check_output"
 CSV_PATH = os.path.join(OUTPUT_DIR, "sanity_check.csv")
 
 # --------------------------------------------------------------------------------------
-# FUNCTIONS SUMMARY 
+# FUNCTIONS SUMMARY
 # - find_zea_above_echotop : ['n_above_echotop', 'n_valid_zea', 'has_above_echotop']
 # - check_single_timestamp : ['n_timestamps', 'is_single_timestamp']
-# - check_single_timestamp_anf : ['n_timestamps_anfa', 'is_single_timestamp_anfa']
+# - check_single_timestamp_anf : ['is_single_timestamp_anfa']
 # - check_all_nan : ['all_nan']
-# - weird_timestamps : ['n_weird_timesteps', 'pct_weird_timesteps', 'values_weird_timesteps']
 # - check_zea_range : ['n_aberrant_val', 'pct_aberrant_range']
 # - check_nearfield_artefact : ['frac_contaminated_nfa', 'is_contaminated_nfa']
 # - check_truncated : ['n_timesteps', 'expected', 'is_truncated']
 # - check_separated_hours : ['is_separated_hour']
-# - check_var_coherence : ['n_Z_no_Zea', 'pct_Z_no_Zea']
-# - check_laplacian : ['n_aberrant_laplacian', 'pct_aberrant_laplacian']
-# - check_isolated_detections : ['n_isolated', 'pct_isolated']
-# - check_isolated_detections_noise : ["z_min", "n_isolated_weak", "pct_isolated_weak"]
+# - check_regularized_all : ['n_weird_timesteps', 'pct_weird_timesteps', 'values_weird_timesteps',
+#                             'n_incoherent', 'pct_incoherent',
+#                             'n_aberrant_laplacian', 'pct_aberrant_laplacian',
+#                             'n_isolated', 'pct_isolated',
+#                             'z_min', 'n_isolated_weak', 'pct_isolated_weak']
 # -----------------------------------------------------------------------------------------
 
 def ensure_base_csv(folder: str, year: int, csv_path: str) -> None:
@@ -62,7 +57,11 @@ def ensure_base_csv(folder: str, year: int, csv_path: str) -> None:
     os.makedirs(os.path.dirname(csv_path), exist_ok=True) 
  
     if not os.path.exists(csv_path):
-        df = file_exist_csv(folder, start_date=datetime(2025, 1, 1, 0), end_date=datetime(2025, 12, 31, 23))
+        df = file_exist_csv(
+            folder, 
+            start_date=datetime(year, 1, 1, 0), 
+            end_date=datetime(year, 12, 31, 23),
+            )
         df.to_csv(csv_path, index=False)
  
  
@@ -97,13 +96,6 @@ def run_all_checks(files, csv_path: str) -> None:
         csv_path=csv_path,
     )
  
-    # WEIRD TIMESTAMPS
-    run_check_if_needed(
-        weird_timestamps, files,
-        ['n_weird_timesteps', 'pct_weird_timesteps', 'values_weird_timesteps'],
-        csv_path=csv_path,
-    )
- 
     # ABERRANT ZEA VALUES
     run_check_if_needed(
         check_zea_range, files,
@@ -134,33 +126,20 @@ def run_all_checks(files, csv_path: str) -> None:
         separated=separated,
     )
  
-    # COHERENCE BETWEEN VARIABLES
+    # ALL CHECKS THAT NEED THE REGULARIZED TIME GRID, IN ONE PASS
+    # (weird timestamps, variable coherence, laplacian, isolated detections,
+    # isolated weak detections) -> regularize_time_grid() runs once per file.
     run_check_if_needed(
-        check_var_coherence, files,
-        ['n_incoherent', 'pct_incoherent'],
+        check_regularized_all, files,
+        ['n_weird_timesteps', 'pct_weird_timesteps', 'values_weird_timesteps',
+         'n_incoherent', 'pct_incoherent',
+         'n_aberrant_laplacian', 'pct_aberrant_laplacian',
+         'n_isolated', 'pct_isolated',
+         'z_min', 'n_isolated_weak', 'pct_isolated_weak'],
         csv_path=csv_path,
     )
- 
-    # LAPLACIAN CHECK
-    run_check_if_needed(
-        check_laplacian, files,
-        ['n_aberrant_laplacian', 'pct_aberrant_laplacian'],
-        csv_path=csv_path,
-    )
- 
-    # ISOLATED DETECTIONS
-    run_check_if_needed(
-        check_isolated_detections, files,
-        ['n_isolated', 'pct_isolated'],
-        csv_path=csv_path,
-    )
- 
-    # ISOLATED DETECTIONS ONLY FOR WEAK VALUES
-    run_check_if_needed(
-        check_isolated_detections_noise, files,
-        ["z_min", "n_isolated_weak", "pct_isolated_weak"],
-        csv_path=csv_path,
-    )
+
+   
  
  
 def main() -> None:

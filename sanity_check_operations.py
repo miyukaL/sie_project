@@ -112,6 +112,23 @@ def check_all_nan(f, n_gates_av=NEAR_FIELD_AV, n_gates_ap=NEAR_FIELD_AP, date='2
     })
 
 
+# -----------------------------------------------------------------------------------
+# CHECKS RELYING ON THE REGULARIZED TIME GRID
+# -----------------------------------------------------------------------------------
+#
+# regularize_time_grid() is expensive. Instead of calling it separately in each
+# check (as before), the "_core" helpers below take an already-open/regularized
+# dataset and only compute the metrics. check_regularized_all() opens the file,
+# regularizes it ONCE, then runs every "_core" helper on that single dataset.
+#
+# The original standalone functions (weird_timestamps, check_var_coherence,
+# check_laplacian, check_isolated_detections, check_isolated_detections_noise)
+# are kept below, unchanged, in case you need to run one of them in isolation.
+# run_sanity_check.py now calls check_regularized_all() instead of the five
+# separate functions.
+# -----------------------------------------------------------------------------------
+
+
 def weird_timestamps(f, atol=0.2, date='2025-05-26', expected_dt_before=10.0, expected_dt_after=5.0):
 
     "Check if timestamps are not regularly spaced"
@@ -120,6 +137,144 @@ def weird_timestamps(f, atol=0.2, date='2025-05-26', expected_dt_before=10.0, ex
     "date : date of the MRR configuration change"
     "expected_dt_before : expected timestep before configuration change"
     "expected_dt_after : expected timestep after configuration change"
+
+
+def _weird_timestamps_core(ds, date='2025-05-26', atol=0.2, expected_dt_before=10.0, expected_dt_after=5.0):
+    dt = pd.Series(ds.time.values).diff().dt.total_seconds().dropna()
+
+    expected_dt = expected_dt_before if ds.time.values[0] < np.datetime64(date) else expected_dt_after
+
+    aberrant_dt = dt[~np.isclose(dt % expected_dt, 0, atol) &
+                ~np.isclose(dt % expected_dt, expected_dt, atol)]
+
+    return {
+        'n_weird_timesteps': len(aberrant_dt),
+        'pct_weird_timesteps': len(aberrant_dt) / len(dt) * 100 if len(dt) > 0 else 0,
+        'values_weird_timesteps': aberrant_dt.values
+    }
+
+
+def _var_coherence_core(ds, n_gates):
+    zea = ds.Zea.isel(range=slice(n_gates, None))
+    vel = ds.VEL.isel(range=slice(n_gates, None))
+    width = ds.WIDTH.isel(range=slice(n_gates, None))
+
+    n_incoherent = int((vel.notnull() & zea.isnull()).sum().compute())
+    n_incoherent += int((width.notnull() & zea.isnull()).sum().compute())
+    n_incoherent += int((zea.notnull() & vel.isnull()).sum().compute())
+    n_total = int(max(zea.size, vel.size, width.size))
+
+    return {
+        'n_incoherent': n_incoherent,
+        'pct_incoherent': (n_incoherent / n_total * 100) if n_total > 0 else 0
+    }
+
+
+def _laplacian_core(ds, n_gates, threshold_range=20, threshold_time=20):
+    zea = ds['Zea'].isel(range=slice(n_gates, None))
+
+    # Vertical gradient
+    dZea_range = zea.diff(dim='range')
+    both_valid_range = (
+        zea.isel(range=slice(None, -1)).notnull() &
+        zea.isel(range=slice(1, None)).notnull()
+    )
+
+    # Temporal gradient
+    dZea_time = zea.diff(dim='time')
+    both_valid_time = (
+        zea.isel(time=slice(None, -1)).notnull() &
+        zea.isel(time=slice(1, None)).notnull()
+    )
+
+    # Align on same grid of size : (time-1, range-1)
+    dZea_range_aligned = dZea_range.isel(time=slice(None, -1))
+    dZea_time_aligned = dZea_time.isel(range=slice(None, -1))
+    both_valid_aligned = both_valid_range.isel(time=slice(None, -1)) & both_valid_time.isel(range=slice(None, -1))
+
+    gradient_2d = np.sqrt(dZea_range_aligned**2 + dZea_time_aligned**2)
+
+    aberrant = (gradient_2d > np.sqrt(threshold_range**2 + threshold_time**2)) & both_valid_aligned
+
+    n_aberrant = int(aberrant.sum().compute())
+    n_valid = int(both_valid_aligned.sum().compute())
+
+    return {
+        'n_aberrant_laplacian': n_aberrant,
+        'pct_aberrant_laplacian': (n_aberrant / n_valid * 100) if n_valid > 0 else 0
+    }
+
+
+def _isolated_common(ds, n_gates, radius_range=5, radius_time=5):
+    """Shared computation reused by both isolated-detection checks below,
+    since they both use the same default neighborhood radius."""
+    zea = ds['Zea'].isel(range=slice(n_gates, None)).compute()
+    valid = zea.notnull()
+    valid_arr = valid.values.astype(float)
+
+    size = (2 * radius_time + 1, 2 * radius_range + 1)
+    n_neighbors = uniform_filter(valid_arr, size=size, mode='constant', cval=0)
+    n_neighbors = np.round(n_neighbors * size[0] * size[1]).astype(int)
+
+    return zea, valid, n_neighbors
+
+
+def _isolated_core(valid, n_neighbors):
+    valid_bool = valid.values
+    isolated = valid_bool & (n_neighbors - 1 < 1)
+
+    n_isolated = int(isolated.sum())
+    n_valid = int(valid_bool.sum())
+
+    return {
+        'n_isolated': n_isolated,
+        'pct_isolated': (n_isolated / n_valid * 100) if n_valid > 0 else 0
+    }
+
+
+def _isolated_noise_core(zea, valid, n_neighbors, z_min=-10):
+    valid_below = (valid & (zea < z_min)).values.astype(bool)
+    isolated = valid_below & (n_neighbors - 1 == 0)
+
+    n_isolated = int(isolated.sum())
+    n_valid = int(valid.values.sum())
+
+    pct = (n_isolated / n_valid * 100) if n_valid > 0 else np.nan
+
+    return {
+        'z_min': z_min,
+        'n_isolated_weak': n_isolated,
+        'pct_isolated_weak': pct,
+    }
+
+
+def check_regularized_all(f, n_gates_av=NEAR_FIELD_AV, n_gates_ap=NEAR_FIELD_AP, date='2025-05-26',
+                           atol=0.2, expected_dt_before=10.0, expected_dt_after=5.0,
+                           threshold_range=20, threshold_time=20,
+                           radius_range=5, radius_time=5, z_min=-10):
+    """Run every check that needs the regularized time grid, regularizing ONCE."""
+
+    ds = xr.open_dataset(f)
+    ds = regularize_time_grid(ds)
+    n_gates = n_gates_av if ds.time.values[0] < np.datetime64(date) else n_gates_ap
+
+    result = {'file': f.name}
+    result.update(_weird_timestamps_core(ds, date, atol, expected_dt_before, expected_dt_after))
+    result.update(_var_coherence_core(ds, n_gates))
+    result.update(_laplacian_core(ds, n_gates, threshold_range, threshold_time))
+
+    zea, valid, n_neighbors = _isolated_common(ds, n_gates, radius_range, radius_time)
+    result.update(_isolated_core(valid, n_neighbors))
+    result.update(_isolated_noise_core(zea, valid, n_neighbors, z_min))
+
+    return pd.Series(result)
+
+
+# -----------------------------------------------------------------------------------
+# LEGACY STANDALONE VERSIONS (kept for reference / standalone use, each still
+# calls regularize_time_grid() on its own — prefer check_regularized_all above
+# when running the full pipeline).
+# -----------------------------------------------------------------------------------
 
     ds = xr.open_dataset(f)
     ds = regularize_time_grid(ds)
@@ -442,6 +597,3 @@ def run_check_if_needed(check_fn, files, columns, csv_path=CSV_PATH, n_jobs=8, *
     add_to_csv(df, pd.DataFrame(results), csv_path)
     print(f"Done. Columns {columns} added to {csv_path}.")
     return 
-
-
-
